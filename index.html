@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Evaluation Results Map</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+
+        .popup-content {
+            font-family: Arial, sans-serif;
+            max-width: 400px;
+        }
+
+        .site-header {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+
+        .site-description {
+            margin-bottom: 12px;
+            color: #555;
+            font-style: italic;
+        }
+
+        .seasons-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .season-block {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+
+        .season-header {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #2980b9;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            font-size: 12px;
+            margin-top; 10px;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .metric-label {
+            color: #666;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .suitability-score {
+            background-color: #e8f5e8;
+            border: 1px solid lightgray;
+            border-radius: 4px;
+            padding: 4px 8px;
+            margin-top: 15px;
+            text-align: center;
+            font-size: 11px;
+            color: #2e7d32;
+        }
+
+        .sidebar {
+            position: fixed;
+            top: 0;
+            right: -500px;
+            width: 500px;
+            height: 100vh;
+            background-color: white;
+            box-shadow: -2px 0 10px rgba(0, 0, 0, 0.3);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .sidebar.open {
+            right: 0;
+        }
+
+        .sidebar-close {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
+        .sidebar-close:hover {
+            background: #c82333;
+        }
+
+        #sidebar-content {
+            margin-top: 40px;
+        }
+
+        .filter-toggle {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: black transparent(0.5);
+            border: 1px solid lightgray;
+            border-radius: 8px;
+            padding: 10px 15px;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        .filter-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .filter-toggle input[type="checkbox"] {
+            transform: scale(1.2);
+        }
+
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <!-- Filter Toggle -->
+    <div class="filter-toggle">
+        <label>
+            <input type="checkbox" id="highQualityFilter" onchange="toggleHighQualityFilter()">
+        </label>
+    </div>
+
+    <!-- Sidebar -->
+    <div id="sidebar" class="sidebar">
+        <button class="sidebar-close" onclick="closeSidebar()">&times;</button>
+        <div id="sidebar-content"></div>
+    </div>
+
+</body>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([36.94, -2.0332], 10);
+
+        // Add OpenStreetMap tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Function to load GeoJSON data
+        async function loadGeoJSONData() {
+            try {
+                const response = await fetch('site_evaluation_results.geojson');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const geojsonData = await response.json();
+                return geojsonData;
+            } catch (error) {
+                console.error('Error loading GeoJSON data:', error);
+                alert('Error loading site data. Please make sure site_evaluation_results.geojson is in the same directory as this HTML file.');
+                return null;
+            }
+        }
+
+        // Function to create popup content
+        function createPopupContent(properties) {
+            const { sitename, vegetation_type, description, seasons } = properties;
+
+            let seasonsHtml = '';
+            // Sort seasons by suitability score in descending order
+            const sortedSeasons = Object.entries(seasons).sort((a, b) => b[1].suitability_score - a[1].suitability_score);
+            sortedSeasons.forEach(([year, data]) => {
+                seasonsHtml += `
+                    <div class="season-block">
+                        <div class="season-header">${year} Season</div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 8px;">${data.season_start_date} to ${data.season_end_date} (${data.season_length_days} days)</div>
+                        <div class="metrics-grid">
+                            <div class="metric">
+                                <span class="metric-label">S2 Scenes:</span>
+                                <span class="metric-value">${data.sentinel2_scenes}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">S3 Scenes:</span>
+                                <span class="metric-value">${data.sentinel3_scenes}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">S2 Cloud %:</span>
+                                <span class="metric-value">${data.s2_cloud_cover_mean}%</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">S3 Cloud %:</span>
+                                <span class="metric-value">${data.s3_cloud_cover_mean}%</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Max S2 Gap:</span>
+                                <span class="metric-value">${data.max_s2_gap_days} days</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Max S3 Gap:</span>
+                                <span class="metric-value">${data.max_s3_gap_days} days</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">S2 Gap Count:</span>
+                                <span class="metric-value">${data.s2_gap_count}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">S3 Gap Count:</span>
+                                <span class="metric-value">${data.s3_gap_count}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">S2 Weighted Gap:</span>
+                                <span class="metric-value">${data.s2_weighted_gap_score}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">S3 Weighted Gap:</span>
+                                <span class="metric-value">${data.s3_weighted_gap_score}</span>
+                            </div>
+                        </div>
+                        <div class="suitability-score" style="background-color: ${getSuitabilityColor(data.suitability_score)}; color: ${data.suitability_score * 100 <= 75 ? 'white' : 'black'};">
+                            Suitability Score: ${data.suitability_score}
+                        </div>
+                    </div>
+                `;
+            });
+
+            return `
+                <div class="popup-content">
+                    <div class="site-header">${sitename.toUpperCase()} (${vegetation_type})</div>
+                    <div style="margin-bottom: 8px;">
+                        <a href="https://phenocam.nau.edu/webcam/sites/${sitename}" target="_blank" style="color: #2980b9; text-decoration: none; font-size: 13px;">
+                            🔗 View on PhenoCam
+                        </a>
+                    </div>
+                    <div class="site-description">${description}</div>
+                    <div class="seasons-container">
+                        ${seasonsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Function to get marker style based on highest suitability score
+        function getMarkerStyle(properties) {
+            // Find the highest suitability score across all seasons
+            const seasons = properties.seasons;
+            let highestScore = 0;
+
+            Object.values(seasons).forEach(season => {
+                if (season.suitability_score > highestScore) {
+                    highestScore = season.suitability_score;
+                }
+            });
+
+            // Convert score to percentage (assuming scores are 0-1, multiply by 100)
+            const scorePercent = highestScore * 100;
+
+            let fillColor, radius;
+
+            if (scorePercent > 95) {
+                // Excellent: Soft Green
+                fillColor = '#4caf50';
+                radius = 14;
+            } else if (scorePercent > 90) {
+                // Very Good: Soft Yellow
+                fillColor = '#ffeb3b';
+                radius = 12;
+            } else if (scorePercent > 85) {
+                // Good: Soft Orange
+                fillColor = '#ff9800';
+                radius = 10;
+            } else if (scorePercent > 75) {
+                // Fair: Soft Purple
+                fillColor = '#9c27b0';
+                radius = 8;
+            } else {
+                // Poor: Gray
+                fillColor = '#9e9e9e';
+                radius = 6;
+            }
+
+            return {
+                radius: radius,
+                fillColor: fillColor,
+                color: '#000',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            };
+        }
+
+        // Global variables
+        let geoJsonLayer = null;
+        let originalGeoJsonData = null;
+
+        // Initialize map with data
+        async function initializeMap() {
+            const geojsonData = await loadGeoJSONData();
+
+            if (!geojsonData) {
+                return; // Error already handled in loadGeoJSONData
+            }
+
+            // Store original data for filtering
+            originalGeoJsonData = geojsonData;
+
+            // Create initial layer
+            createGeoJsonLayer(geojsonData);
+
+            // Fit map to show all features
+            fitMapToFeatures(geojsonData);
+        }
+
+        // Function to create GeoJSON layer
+        function createGeoJsonLayer(geojsonData) {
+            // Remove existing layer if it exists
+            if (geoJsonLayer) {
+                map.removeLayer(geoJsonLayer);
+            }
+
+            // Add GeoJSON layer to map
+            geoJsonLayer = L.geoJSON(geojsonData, {
+                pointToLayer: function(feature, latlng) {
+                    return L.circleMarker(latlng, getMarkerStyle(feature.properties));
+                },
+                onEachFeature: function(feature, layer) {
+                    layer.on('click', function(e) {
+                        openSidebar(feature.properties);
+                    });
+                }
+            }).addTo(map);
+        }
+
+        // Function to fit map to features
+        function fitMapToFeatures(geojsonData) {
+            const bounds = L.latLngBounds();
+            geojsonData.features.forEach(feature => {
+                if (feature.geometry.type === 'Point') {
+                    bounds.extend([feature.geometry.coordinates[1], feature.geometry.coordinates[0]]);
+                }
+            });
+
+            if (bounds.isValid()) {
+                map.fitBounds(bounds, { padding: [20, 20] });
+            }
+        }
+
+        // Function to open sidebar
+        function openSidebar(properties) {
+            const sidebarContent = document.getElementById('sidebar-content');
+            sidebarContent.innerHTML = createPopupContent(properties);
+            document.getElementById('sidebar').classList.add('open');
+        }
+
+        // Function to close sidebar
+        function closeSidebar() {
+            document.getElementById('sidebar').classList.remove('open');
+        }
+
+        // Function to get suitability score color
+        function getSuitabilityColor(score) {
+            const scorePercent = score * 100;
+
+            if (scorePercent > 95) {
+                return '#c8e6c9'; // Soft green
+            } else if (scorePercent > 90) {
+                return '#fff3cd'; // Soft yellow
+            } else if (scorePercent > 85) {
+                return '#ffe0b2'; // Soft orange
+            } else if (scorePercent > 75) {
+                return '#e1bee7'; // Soft purple
+            } else {
+                return '#e0e0e0'; // Gray
+            }
+        }
+
+        // Function to toggle high quality filter
+        function toggleHighQualityFilter() {
+            const checkbox = document.getElementById('highQualityFilter');
+            const isChecked = checkbox.checked;
+
+            if (!originalGeoJsonData) {
+                return;
+            }
+
+            let filteredData;
+
+            if (isChecked) {
+                // Filter to show only sites with at least one season having suitability score > 0.88
+                filteredData = {
+                    ...originalGeoJsonData,
+                    features: originalGeoJsonData.features.filter(feature => {
+                        const seasons = feature.properties.seasons;
+                        return Object.values(seasons).some(season => season.suitability_score > 0.89);
+                    })
+                };
+            } else {
+                // Show all sites
+                filteredData = originalGeoJsonData;
+            }
+
+            // Update the map with filtered data
+            createGeoJsonLayer(filteredData);
+        }
+
+        // Load the data and initialize the map
+        initializeMap();
+    </script>
+</body>
+</html>
+```

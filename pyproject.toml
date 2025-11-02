@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phenocam-satellite-finder"
+version = "0.0.1"
+description = "Find satellite data at PhenoCam locations"
+authors = [
+    {name = "Felix Delattre"},
+]
+dependencies = [
+    "requests>=2.28.0",
+    "loguru>=0.7.0",
+]
+
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+license = {text = "MIT"}
+readme = "README.md"
+keywords = ["phenocam", "satellite", "stac", "remote-sensing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["-v"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

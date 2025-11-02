@@ -1,0 +1,35 @@
+[
+  {
+    "location": {
+      "sitename": "aguamarga",
+      "lat": 36.94,
+      "lon": -2.0332,
+      "description": "Grassland, Balsa Blanca, Almer\u00eda, Spain",
+      "vegetation_type": ""
+    },
+    "satellite_images": 10,
+    "latest_image": "2025-11-02"
+  },
+  {
+    "location": {
+      "sitename": "almondifapa",
+      "lat": 37.8545,
+      "lon": -4.8064,
+      "description": "Almond orchard in Cordoba (Spain)",
+      "vegetation_type": ""
+    },
+    "satellite_images": 10,
+    "latest_image": "2025-11-01"
+  },
+  {
+    "location": {
+      "sitename": "amtsvenn",
+      "lat": 52.176,
+      "lon": 6.955,
+      "description": "EC tower, Amtsvenn peatland, Northrhein-Westphalia, Germany",
+      "vegetation_type": ""
+    },
+    "satellite_images": 10,
+    "latest_image": "2025-11-02"
+  }
+]

@@ -1,0 +1,186 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -2.0332,
+          36.94
+        ]
+      },
+      "properties": {
+        "sitename": "aguamarga",
+        "vegetation_type": "GR",
+        "description": "Grassland, Balsa Blanca, Almería, Spain",
+        "seasons": {
+          "2025": {
+            "sentinel2_scenes": 186,
+            "sentinel3_scenes": 181,
+            "s2_cloud_cover_mean": 6.8,
+            "s3_cloud_cover_mean": 13.9,
+            "max_s2_gap_days": 9,
+            "max_s3_gap_days": 9,
+            "s2_gap_count": 5,
+            "s3_gap_count": 6,
+            "s2_weighted_gap_score": 0.7,
+            "s3_weighted_gap_score": 0.621,
+            "season_start_date": "2025-03-01",
+            "season_end_date": "2025-11-28",
+            "season_length_days": 272,
+            "suitability_score": 0.96
+          }
+        }
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.0743,
+          35.3045
+        ]
+      },
+      "properties": {
+        "sitename": "forthgr",
+        "vegetation_type": "AG",
+        "description": "FORTH Heraklion Greece",
+        "seasons": {
+          "2025": {
+            "sentinel2_scenes": 108,
+            "sentinel3_scenes": 214,
+            "s2_cloud_cover_mean": 5.6,
+            "s3_cloud_cover_mean": 9.8,
+            "max_s2_gap_days": 12,
+            "max_s3_gap_days": 13,
+            "s2_gap_count": 6,
+            "s3_gap_count": 2,
+            "s2_weighted_gap_score": 0.811,
+            "s3_weighted_gap_score": 0.572,
+            "season_start_date": "2025-03-01",
+            "season_end_date": "2025-11-28",
+            "season_length_days": 272,
+            "suitability_score": 0.95
+          }
+        }
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          11.320308,
+          47.116171
+        ]
+      },
+      "properties": {
+        "sitename": "innsbruck",
+        "vegetation_type": "GR",
+        "description": "Neustift Field Site, Stubai Valley, Tyrol, Austria",
+        "seasons": {
+          "2017": {
+            "sentinel2_scenes": 32,
+            "sentinel3_scenes": 118,
+            "s2_cloud_cover_mean": 11.7,
+            "s3_cloud_cover_mean": 18.3,
+            "max_s2_gap_days": 21,
+            "max_s3_gap_days": 22,
+            "s2_gap_count": 16,
+            "s3_gap_count": 14,
+            "s2_weighted_gap_score": 1.531,
+            "s3_weighted_gap_score": 1.243,
+            "season_start_date": "2017-03-01",
+            "season_end_date": "2017-11-28",
+            "season_length_days": 272,
+            "suitability_score": 0.88
+          }
+        }
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.3688,
+          58.5633
+        ]
+      },
+      "properties": {
+        "sitename": "pitsalu",
+        "vegetation_type": "WL",
+        "description": "Abandoned peat extraction area, Estonia",
+        "seasons": {
+          "2025": {
+            "sentinel2_scenes": 135,
+            "sentinel3_scenes": 36,
+            "s2_cloud_cover_mean": 11.7,
+            "s3_cloud_cover_mean": 22.2,
+            "max_s2_gap_days": 14,
+            "max_s3_gap_days": 24,
+            "s2_gap_count": 17,
+            "s3_gap_count": 13,
+            "s2_weighted_gap_score": 1.104,
+            "s3_weighted_gap_score": 1.596,
+            "season_start_date": "2025-03-01",
+            "season_end_date": "2025-11-28",
+            "season_length_days": 272,
+            "suitability_score": 0.92
+          }
+        }
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          19.7673,
+          64.2437
+        ]
+      },
+      "properties": {
+        "sitename": "vindeln2",
+        "vegetation_type": "DB",
+        "description": "SITES Svartberget Research Station, Vindeln, Sweden",
+        "seasons": {
+          "2025": {
+            "sentinel2_scenes": 56,
+            "sentinel3_scenes": 13,
+            "s2_cloud_cover_mean": 11.4,
+            "s3_cloud_cover_mean": 22.2,
+            "max_s2_gap_days": 19,
+            "max_s3_gap_days": 11,
+            "s2_gap_count": 15,
+            "s3_gap_count": 1,
+            "s2_weighted_gap_score": 1.28,
+            "s3_weighted_gap_score": 0.074,
+            "season_start_date": "2025-03-01",
+            "season_end_date": "2025-11-28",
+            "season_length_days": 272,
+            "suitability_score": 0.84
+          },
+          "2018": {
+            "sentinel2_scenes": 47,
+            "sentinel3_scenes": 21,
+            "s2_cloud_cover_mean": 11.5,
+            "s3_cloud_cover_mean": 22.9,
+            "max_s2_gap_days": 26,
+            "max_s3_gap_days": 88,
+            "s2_gap_count": 18,
+            "s3_gap_count": 3,
+            "s2_weighted_gap_score": 1.553,
+            "s3_weighted_gap_score": 31.832,
+            "season_start_date": "2018-03-01",
+            "season_end_date": "2018-11-28",
+            "season_length_days": 272,
+            "suitability_score": 0.88
+          }
+        }
+      }
+    }
+  ]
+}

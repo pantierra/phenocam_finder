@@ -82,15 +82,79 @@
             color: #2c3e50;
         }
 
-        .suitability-score {
-            background-color: #e8f5e8;
-            border: 1px solid lightgray;
+        .ndvi-expandable {
+            margin-top: 12px;
+            border: 1px solid #ddd;
             border-radius: 4px;
-            padding: 4px 8px;
-            margin-top: 15px;
-            text-align: center;
-            font-size: 11px;
+            overflow: hidden;
+        }
+
+        .ndvi-toggle {
+            background-color: #e8f5e9;
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: bold;
             color: #2e7d32;
+        }
+
+        .ndvi-toggle:hover {
+            background-color: #c8e6c9;
+        }
+
+        .ndvi-toggle-icon {
+            transition: transform 0.3s;
+        }
+
+        .ndvi-toggle-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .ndvi-time-series {
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+            background-color: #f9f9f9;
+        }
+
+        .ndvi-time-series.show {
+            display: block;
+        }
+
+        .ndvi-observation {
+            padding: 4px 12px;
+            border-bottom: 1px solid #eee;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .ndvi-observation:last-child {
+            border-bottom: none;
+        }
+
+        .ndvi-date {
+            color: #666;
+        }
+
+        .ndvi-value {
+            font-weight: bold;
+            color: #2e7d32;
+        }
+
+        /* Style for outliers (implausible NDVI) and null values */
+        .ndvi-observation.cloudy {
+            background-color: #f5f5f5;
+            opacity: 0.7;
+        }
+
+        .ndvi-observation.cloudy .ndvi-value {
+            color: #999;
+            font-weight: normal;
+            font-style: italic;
         }
 
         .sidebar {
@@ -213,7 +277,7 @@
         // Function to load GeoJSON data
         async function loadGeoJSONData() {
             try {
-                const response = await fetch('site_evaluation_results.geojson');
+                const response = await fetch(`all_sites.geojson?t=${Date.now()}`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -221,34 +285,76 @@
                 return geojsonData;
             } catch (error) {
                 console.error('Error loading GeoJSON data:', error);
-                alert('Error loading site data. Please make sure site_evaluation_results.geojson is in the same directory as this HTML file.');
+                alert('Error loading site data. Please make sure all_sites.geojson is in the same directory as this HTML file.');
                 return null;
             }
         }
 
         // Function to load selected sites GeoJSON data
         async function loadSelectedSitesData() {
+            // First try to load pre-generated filtered GeoJSON
             try {
-                const response = await fetch('selected_sites.json');
+                const response = await fetch('selected_sites.geojson');
+                if (response.ok) {
+                    const filteredGeojson = await response.json();
+                    console.log('Loaded pre-filtered GeoJSON');
+                    return { type: 'filtered_geojson', data: filteredGeojson };
+                }
+            } catch (error) {
+                console.log('Pre-filtered GeoJSON not found, falling back to config.yaml');
+            }
+
+            // Fallback to parsing config.yaml
+            try {
+                const response = await fetch('config.yaml');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const geojsonData = await response.json();
-                return geojsonData;
+                const yamlText = await response.text();
+
+                // Simple YAML parser for the config structure
+                const config = {};
+                const lines = yamlText.split('\n');
+                let currentSite = null;
+
+                for (const line of lines) {
+                    // Skip comments and empty lines
+                    if (line.trim().startsWith('#') || line.trim() === '') continue;
+
+                    // Check if it's a site line (no leading dash)
+                    if (line.match(/^  \w+:$/)) {
+                        currentSite = line.trim().replace(':', '');
+                        config[currentSite] = [];
+                    }
+                    // Check if it's a year line (with leading dash)
+                    else if (line.match(/^    - \d+$/)) {
+                        const year = line.trim().replace('-', '').trim();
+                        if (currentSite) {
+                            config[currentSite].push(year);
+                        }
+                    }
+                }
+
+                console.log('Loaded config.yaml:', config);
+                // Debug log for vindeln2 specifically
+                if (config['vindeln2']) {
+                    console.log('vindeln2 configured years:', config['vindeln2']);
+                }
+                return { type: 'config', data: config };
             } catch (error) {
                 console.error('Error loading selected sites data:', error);
-                // Return null silently if selected_sites.json doesn't exist
+                // Return null silently if neither file exists
                 return null;
             }
         }
 
         // Function to create popup content
         function createPopupContent(properties) {
-            const { sitename, vegetation_type, description, seasons } = properties;
+            const {sitename, vegetation_type, description, seasons} = properties;
 
             let seasonsHtml = '';
-            // Sort seasons by suitability score in descending order
-            const sortedSeasons = Object.entries(seasons).sort((a, b) => b[1].suitability_score - a[1].suitability_score);
+            // Sort seasons by year in descending order
+            const sortedSeasons = Object.entries(seasons || {}).sort((a, b) => b[0] - a[0]);
             sortedSeasons.forEach(([year, data]) => {
                 seasonsHtml += `
                     <div class="season-block">
@@ -260,52 +366,76 @@
                                 <span class="metric-value">${data.sentinel2_scenes}</span>
                             </div>
                             <div class="metric">
-                                <span class="metric-label">S3 Scenes:</span>
-                                <span class="metric-value">${data.sentinel3_scenes}</span>
-                            </div>
-                            <div class="metric">
                                 <span class="metric-label">S2 Cloud %:</span>
                                 <span class="metric-value">${data.s2_cloud_cover_mean}%</span>
                             </div>
                             <div class="metric">
-                                <span class="metric-label">S3 Cloud %:</span>
-                                <span class="metric-value">${data.s3_cloud_cover_mean}%</span>
+                                <span class="metric-label">S3 Scenes:</span>
+                                <span class="metric-value">${data.sentinel3_scenes}</span>
                             </div>
                             <div class="metric">
-                                <span class="metric-label">Max S2 Gap:</span>
+                                <span class="metric-label"></span>
+                                <span class="metric-value"></span>
+                            </div>
+
+                            ${data.ndvi_observations > 0 ? `
+                            <div class="metric">
+                                <span class="metric-label">NDVI Mean:</span>
+                                <span class="metric-value" style="color: #2e7d32; font-weight: bold;">${data.ndvi_mean.toFixed(3)}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">NDVI Range:</span>
+                                <span class="metric-value" style="color: #2e7d32;">${data.ndvi_min.toFixed(3)} - ${data.ndvi_max.toFixed(3)}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label" title="Maximum gap between clear S2 scenes used for NDVI">Max S2 Gap (clear):</span>
+                                <span class="metric-value">${data.ndvi_max_s2_gap_days} days</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label" title="Maximum gap between all available S2 scenes">Max S2 Gap (all):</span>
                                 <span class="metric-value">${data.max_s2_gap_days} days</span>
                             </div>
                             <div class="metric">
-                                <span class="metric-label">Max S3 Gap:</span>
-                                <span class="metric-value">${data.max_s3_gap_days} days</span>
+                                <span class="metric-label" title="Number of gaps >3 days between clear S2 scenes used for NDVI">S2 Gap Count (clear):</span>
+                                <span class="metric-value">${data.ndvi_s2_gap_count}</span>
                             </div>
                             <div class="metric">
-                                <span class="metric-label">S2 Gap Count:</span>
+                                <span class="metric-label" title="Number of gaps >3 days between all S2 scenes">S2 Gap Count (all):</span>
                                 <span class="metric-value">${data.s2_gap_count}</span>
                             </div>
                             <div class="metric">
-                                <span class="metric-label">S3 Gap Count:</span>
-                                <span class="metric-value">${data.s3_gap_count}</span>
+                                <span class="metric-label" title="Weighted gap score for clear S2 scenes used for NDVI">S2 Weighted Gap (clear):</span>
+                                <span class="metric-value">${data.ndvi_s2_weighted_gap_score}</span>
                             </div>
                             <div class="metric">
-                                <span class="metric-label">S2 Weighted Gap:</span>
+                                <span class="metric-label" title="Weighted gap score for all S2 scenes">S2 Weighted Gap (all):</span>
                                 <span class="metric-value">${data.s2_weighted_gap_score}</span>
                             </div>
-                            <div class="metric">
-                                <span class="metric-label">S3 Weighted Gap:</span>
-                                <span class="metric-value">${data.s3_weighted_gap_score}</span>
+                            ` : ''}
+                        </div>
+                        ${data.ndvi_observations > 0 && data.ndvi_time_series !== undefined && data.ndvi_time_series.length > 0 ? `
+                        <div class="ndvi-expandable">
+                            <div class="ndvi-toggle" onclick="toggleNDVITimeSeries(event)">
+                                <span>NDVI Time Series (${data.ndvi_time_series ? data.ndvi_time_series.filter(obs => obs.ndvi !== null && !obs.outlier).length : data.ndvi_observations} of ${data.ndvi_time_series ? data.ndvi_time_series.length : 'N/A'} dates)</span>
+                                <span class="ndvi-toggle-icon">▶</span>
+                            </div>
+                            <div class="ndvi-time-series">
+                                ${data.ndvi_time_series.map(obs => `
+                                    <div class="ndvi-observation ${obs.ndvi === null || obs.outlier ? 'cloudy' : ''}">
+                                        <span class="ndvi-date">${obs.date}</span>
+                                        <span class="ndvi-value">${obs.ndvi !== null ? obs.ndvi.toFixed(4) : 'N/A'}</span>
+                                    </div>
+                                `).join('')}
                             </div>
                         </div>
-                        <div class="suitability-score" style="background-color: ${getSuitabilityColor(data.suitability_score)}; color: ${data.suitability_score * 100 <= 75 ? 'white' : 'black'};">
-                            Suitability Score: ${data.suitability_score}
-                        </div>
+                        ` : ''}
                     </div>
                 `;
             });
 
             return `
                 <div class="popup-content">
-                    <div class="site-header">${sitename.toUpperCase()} (${vegetation_type})</div>
+                    <div class="site-header">${sitename.toUpperCase()}${vegetation_type ? ` - ${vegetation_type}` : ''}</div>
                     <div style="margin-bottom: 8px;">
                         <a href="https://phenocam.nau.edu/webcam/sites/${sitename}" target="_blank" style="color: #2980b9; text-decoration: none; font-size: 13px;">
                             🔗 View on PhenoCam
@@ -319,52 +449,30 @@
             `;
         }
 
-        // Function to get marker style based on highest suitability score
-        function getMarkerStyle(properties) {
-            // Find the highest suitability score across all seasons
-            const seasons = properties.seasons;
-            let highestScore = 0;
+        // Function to get marker style based on vegetation type
+        function getMarkerStyle(properties, isSelected = false) {
+            const vegetation_type = properties.vegetation_type || '';
 
-            Object.values(seasons).forEach(season => {
-                if (season.suitability_score > highestScore) {
-                    highestScore = season.suitability_score;
-                }
-            });
+            // Define colors for vegetation types
+            const vegColors = {
+                'Grassland': '#90EE90',        // Light green
+                'Agriculture': '#FFD700',       // Gold
+                'Deciduous Broadleaf': '#228B22', // Forest green
+                'Evergreen Needleleaf': '#006400', // Dark green
+                'Shrubland': '#D2691E',        // Chocolate brown
+                'Wetland': '#4682B4',          // Steel blue
+                'Tundra': '#B0C4DE'            // Light steel blue
+            };
 
-            // Convert score to percentage (assuming scores are 0-1, multiply by 100)
-            const scorePercent = highestScore * 100;
-
-            let fillColor, radius;
-
-            if (scorePercent > 95) {
-                // Excellent: Soft Green
-                fillColor = '#4caf50';
-                radius = 14;
-            } else if (scorePercent > 90) {
-                // Very Good: Soft Yellow
-                fillColor = '#ffeb3b';
-                radius = 12;
-            } else if (scorePercent > 85) {
-                // Good: Soft Orange
-                fillColor = '#ff9800';
-                radius = 10;
-            } else if (scorePercent > 75) {
-                // Fair: Soft Purple
-                fillColor = '#9c27b0';
-                radius = 8;
-            } else {
-                // Poor: Gray
-                fillColor = '#9e9e9e';
-                radius = 6;
-            }
+            let fillColor = vegColors[vegetation_type] || '#808080'; // Default gray
 
             return {
-                radius: radius,
+                radius: 10,
                 fillColor: fillColor,
-                color: '#000',
-                weight: 2,
+                color: isSelected ? '#FF6600' : '#000',  // Orange border when selected
+                weight: isSelected ? 3 : 2,              // Thicker border when selected
                 opacity: 1,
-                fillOpacity: 0.8
+                fillOpacity: 0.85
             };
         }
 
@@ -372,6 +480,7 @@
         let geoJsonLayer = null;
         let originalGeoJsonData = null;
         let selectedSitesData = null;
+        let selectedMarker = null;  // Track currently selected marker
 
         // Initialize map with data
         async function initializeMap() {
@@ -408,6 +517,15 @@
                 },
                 onEachFeature: function(feature, layer) {
                     layer.on('click', function(e) {
+                        // Reset previous selected marker
+                        if (selectedMarker) {
+                            selectedMarker.setStyle(getMarkerStyle(selectedMarker.feature.properties, false));
+                        }
+
+                        // Set new selected marker
+                        selectedMarker = layer;
+                        layer.setStyle(getMarkerStyle(feature.properties, true));
+
                         openSidebar(feature.properties);
                     });
                 }
@@ -428,8 +546,12 @@
             }
         }
 
+        // Track currently open sidebar site
+        let currentSidebarSite = null;
+
         // Function to open sidebar
         function openSidebar(properties) {
+            currentSidebarSite = properties.sitename;
             const sidebarContent = document.getElementById('sidebar-content');
             sidebarContent.innerHTML = createPopupContent(properties);
             document.getElementById('sidebar').classList.add('open');
@@ -437,23 +559,13 @@
 
         // Function to close sidebar
         function closeSidebar() {
+            currentSidebarSite = null;
             document.getElementById('sidebar').classList.remove('open');
-        }
 
-        // Function to get suitability score color
-        function getSuitabilityColor(score) {
-            const scorePercent = score * 100;
-
-            if (scorePercent > 95) {
-                return '#c8e6c9'; // Soft green
-            } else if (scorePercent > 90) {
-                return '#fff3cd'; // Soft yellow
-            } else if (scorePercent > 85) {
-                return '#ffe0b2'; // Soft orange
-            } else if (scorePercent > 75) {
-                return '#e1bee7'; // Soft purple
-            } else {
-                return '#e0e0e0'; // Gray
+            // Reset selected marker style
+            if (selectedMarker) {
+                selectedMarker.setStyle(getMarkerStyle(selectedMarker.feature.properties, false));
+                selectedMarker = null;
             }
         }
 
@@ -469,18 +581,107 @@
             let dataToShow;
 
             if (isChecked && selectedSitesData) {
-                // Show only selected sites
-                dataToShow = selectedSitesData;
+                // Check if we have pre-filtered GeoJSON or need to filter manually
+                if (selectedSitesData.type === 'filtered_geojson') {
+                    // Use pre-filtered GeoJSON directly
+                    dataToShow = selectedSitesData.data;
+                } else if (selectedSitesData.type === 'config') {
+                    // Filter sites and seasons based on config.yaml
+                    const configData = selectedSitesData.data;
+                    dataToShow = {
+                        type: "FeatureCollection",
+                        features: originalGeoJsonData.features.filter(feature => {
+                            const sitename = feature.properties.sitename;
+                            // Check if site is in the config
+                            if (configData[sitename]) {
+                                // Check if this site has any of the selected years
+                                const selectedYears = configData[sitename];
+                                // Debug log for vindeln2
+                                if (sitename === 'vindeln2') {
+                                    console.log('vindeln2 filtering - Selected years:', selectedYears);
+                                    console.log('vindeln2 filtering - Available seasons:', Object.keys(feature.properties.seasons || {}));
+                                }
+                                const hasSelectedSeasons = Object.keys(feature.properties.seasons || {})
+                                    .some(year => selectedYears.includes(year));
+                                return hasSelectedSeasons;
+                            }
+                            return false;
+                        }).map(feature => {
+                            // Map the filtered features with updated seasons
+                            const sitename = feature.properties.sitename;
+                            const selectedYears = configData[sitename];
+                            const filteredSeasons = {};
+
+                            for (const [year, seasonData] of Object.entries(feature.properties.seasons || {})) {
+                                if (selectedYears.includes(year)) {
+                                    filteredSeasons[year] = seasonData;
+                                }
+                            }
+
+                            // Debug log for vindeln2
+                            if (sitename === 'vindeln2') {
+                                console.log('vindeln2 final filtered seasons:', Object.keys(filteredSeasons));
+                            }
+
+                            return {
+                                ...feature,
+                                properties: {
+                                    ...feature.properties,
+                                    seasons: filteredSeasons
+                                }
+                            };
+                        })
+                    };
+                } else {
+                    // Fallback to showing all sites if data structure is unexpected
+                    dataToShow = originalGeoJsonData;
+                }
             } else {
                 // Show all sites
                 dataToShow = originalGeoJsonData;
             }
+
+            // Store current selection before recreating layer
+            const wasSelectedSite = currentSidebarSite;
+            selectedMarker = null;
 
             // Update the map with the appropriate data
             createGeoJsonLayer(dataToShow);
 
             // Fit map to the new data
             fitMapToFeatures(dataToShow);
+
+            // Update sidebar if currently open and restore selection
+            if (wasSelectedSite) {
+                const feature = dataToShow.features.find(f => f.properties.sitename === wasSelectedSite);
+                if (feature) {
+                    // Site is still in filtered data, update sidebar
+                    const sidebarContent = document.getElementById('sidebar-content');
+                    sidebarContent.innerHTML = createPopupContent(feature.properties);
+
+                    // Restore the orange border selection on the new layer
+                    geoJsonLayer.eachLayer(function(layer) {
+                        if (layer.feature && layer.feature.properties.sitename === wasSelectedSite) {
+                            selectedMarker = layer;
+                            layer.setStyle(getMarkerStyle(layer.feature.properties, true));
+                        }
+                    });
+                } else {
+                    // Site was filtered out, close sidebar
+                    closeSidebar();
+                }
+            }
+        }
+
+        // Function to toggle NDVI time series visibility
+        function toggleNDVITimeSeries(event) {
+            event.stopPropagation();
+            const toggle = event.currentTarget;
+            const icon = toggle.querySelector('.ndvi-toggle-icon');
+            const timeSeries = toggle.nextElementSibling;
+
+            icon.classList.toggle('expanded');
+            timeSeries.classList.toggle('show');
         }
 
         // Load the data and initialize the map

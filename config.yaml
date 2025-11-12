@@ -1,0 +1,17 @@
+# NDVI plausibility thresholds for outlier detection
+# Values outside this range are likely clouds/artifacts at the location
+ndvi_min_threshold: 0.1
+ndvi_max_threshold: 0.95
+
+sites:
+  aguamarga:
+    - 2024
+  forthgr:
+    - 2023
+  innsbruck:
+    - 2021
+  pitsalu:
+    - 2024
+  vindeln2:
+    - 2019
+    - 2023

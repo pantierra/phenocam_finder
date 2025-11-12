@@ -6,3 +6,5 @@ venv
 .satellite_cache
 .phenocam_cache
 htmlcov
+.env
+.env.*

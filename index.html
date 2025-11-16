@@ -10,6 +10,9 @@
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossorigin=""/>
 
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
     <style>
         body {
             margin: 0;
@@ -145,6 +148,25 @@
             color: #2e7d32;
         }
 
+        .ndvi-chart-container {
+            margin-top: 16px;
+            padding: 12px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            height: 250px;
+            position: relative;
+        }
+
+        .ndvi-chart-title {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #2980b9;
+            text-align: center;
+        }
+
+
         /* Style for outliers (implausible NDVI) and null values */
         .ndvi-observation.cloudy {
             background-color: #f5f5f5;
@@ -246,8 +268,8 @@
     <!-- Filter Toggle -->
     <div class="filter-toggle">
         <label>
-            <input type="checkbox" id="highQualityFilter" onchange="toggleHighQualityFilter()">
-            Show selected sites
+            <input type="checkbox" id="highQualityFilter" onchange="toggleHighQualityFilter()" checked>
+            Show selected sites & seasons only
         </label>
     </div>
 
@@ -414,9 +436,13 @@
                             ` : ''}
                         </div>
                         ${data.ndvi_observations > 0 && data.ndvi_time_series !== undefined && data.ndvi_time_series.length > 0 ? `
+                        <div class="ndvi-chart-container">
+                            <div class="ndvi-chart-title">NDVI Time Series</div>
+                            <canvas id="ndvi-chart-${year}-${Math.random().toString(36).substr(2, 9)}" style="position: absolute; top: 35px; left: 12px; right: 12px; bottom: 12px;"></canvas>
+                        </div>
                         <div class="ndvi-expandable">
                             <div class="ndvi-toggle" onclick="toggleNDVITimeSeries(event)">
-                                <span>NDVI Time Series (${data.ndvi_time_series ? data.ndvi_time_series.filter(obs => obs.ndvi !== null && !obs.outlier).length : data.ndvi_observations} of ${data.ndvi_time_series ? data.ndvi_time_series.length : 'N/A'} dates)</span>
+                                <span>NDVI Time Series Data (${data.ndvi_time_series ? data.ndvi_time_series.filter(obs => obs.ndvi !== null && !obs.outlier).length : data.ndvi_observations} of ${data.ndvi_time_series ? data.ndvi_time_series.length : 'N/A'} dates)</span>
                                 <span class="ndvi-toggle-icon">▶</span>
                             </div>
                             <div class="ndvi-time-series">
@@ -496,11 +522,17 @@
             // Load selected sites data
             selectedSitesData = await loadSelectedSitesData();
 
-            // Create initial layer
-            createGeoJsonLayer(geojsonData);
-
-            // Fit map to show all features
-            fitMapToFeatures(geojsonData);
+            // Check if filter is checked by default and apply it
+            const checkbox = document.getElementById('highQualityFilter');
+            if (checkbox.checked) {
+                // Apply filter on initial load
+                toggleHighQualityFilter();
+            } else {
+                // Create initial layer with all data
+                createGeoJsonLayer(geojsonData);
+                // Fit map to show all features
+                fitMapToFeatures(geojsonData);
+            }
         }
 
         // Function to create GeoJSON layer
@@ -555,6 +587,20 @@
             const sidebarContent = document.getElementById('sidebar-content');
             sidebarContent.innerHTML = createPopupContent(properties);
             document.getElementById('sidebar').classList.add('open');
+
+            // Initialize charts in sidebar after a short delay
+            setTimeout(() => {
+                properties.seasons && Object.entries(properties.seasons).forEach(([year, data]) => {
+                    if (data.ndvi_time_series && data.ndvi_time_series.length > 0) {
+                        const canvasElements = sidebarContent.querySelectorAll(`[id^="ndvi-chart-${year}"]`);
+                        canvasElements.forEach(canvas => {
+                            if (canvas) {
+                                createNDVIChart(canvas, data.ndvi_time_series);
+                            }
+                        });
+                    }
+                });
+            }, 100);
         }
 
         // Function to close sidebar
@@ -659,6 +705,20 @@
                     const sidebarContent = document.getElementById('sidebar-content');
                     sidebarContent.innerHTML = createPopupContent(feature.properties);
 
+                    // Reinitialize charts after updating sidebar
+                    setTimeout(() => {
+                        feature.properties.seasons && Object.entries(feature.properties.seasons).forEach(([year, data]) => {
+                            if (data.ndvi_time_series && data.ndvi_time_series.length > 0) {
+                                const canvasElements = sidebarContent.querySelectorAll(`[id^="ndvi-chart-${year}"]`);
+                                canvasElements.forEach(canvas => {
+                                    if (canvas) {
+                                        createNDVIChart(canvas, data.ndvi_time_series);
+                                    }
+                                });
+                            }
+                        });
+                    }, 100);
+
                     // Restore the orange border selection on the new layer
                     geoJsonLayer.eachLayer(function(layer) {
                         if (layer.feature && layer.feature.properties.sitename === wasSelectedSite) {
@@ -671,6 +731,107 @@
                     closeSidebar();
                 }
             }
+        }
+
+        // Function to create NDVI chart
+        function createNDVIChart(canvas, timeSeries) {
+            const ctx = canvas.getContext('2d');
+
+            // Destroy existing chart if it exists
+            if (canvas.chartInstance) {
+                canvas.chartInstance.destroy();
+            }
+
+            // Prepare data for chart
+            const validData = timeSeries.filter(obs => obs.ndvi !== null && !obs.outlier);
+            const outlierData = timeSeries.filter(obs => obs.ndvi !== null && obs.outlier);
+
+            canvas.chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timeSeries.map(obs => obs.date),
+                    datasets: [
+                        {
+                            label: 'NDVI',
+                            data: timeSeries.map(obs => obs.ndvi !== null && !obs.outlier ? obs.ndvi : null),
+                            borderColor: '#2e7d32',
+                            backgroundColor: '#2e7d32',
+                            borderWidth: 2,
+                            pointRadius: 3,
+                            pointHoverRadius: 5,
+                            tension: 0.1,
+                            spanGaps: false
+                        },
+                        {
+                            label: 'Outliers',
+                            data: timeSeries.map(obs => obs.ndvi !== null && obs.outlier ? obs.ndvi : null),
+                            borderColor: '#999999',
+                            backgroundColor: '#999999',
+                            borderWidth: 0,
+                            pointRadius: 3,
+                            pointHoverRadius: 5,
+                            pointStyle: 'cross',
+                            showLine: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 0
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.parsed.y !== null) {
+                                        return context.dataset.label + ': ' + context.parsed.y.toFixed(4);
+                                    }
+                                    return 'N/A';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: false
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                font: {
+                                    size: 9
+                                },
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'NDVI',
+                                font: {
+                                    size: 10
+                                }
+                            },
+                            min: 0,
+                            max: 1,
+                            ticks: {
+                                font: {
+                                    size: 9
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         // Function to toggle NDVI time series visibility

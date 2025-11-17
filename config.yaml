@@ -4,8 +4,6 @@ ndvi_min_threshold: 0.1
 ndvi_max_threshold: 0.95
 
 sites:
-  aguamarga:
-    - 2024
   forthgr:
     - 2023
   innsbruck:
@@ -18,6 +16,4 @@ sites:
   sunflowerjerez1:
     - 2024
   institutekarnobat:
-    - 2022
-    - 2023
     - 2024

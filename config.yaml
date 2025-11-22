@@ -1,7 +1,17 @@
-# NDVI plausibility thresholds for outlier detection
-# Values outside this range are likely clouds/artifacts at the location
-ndvi_min_threshold: 0.1
-ndvi_max_threshold: 0.95
+# Upper envelope outlier detection parameters
+# Detects outliers based on deviation from the upper envelope of NDVI values
+# This adaptive method handles seasonal variations better than static thresholds
+
+# Size of rolling window in days for calculating upper envelope
+envelope_window_days: 30
+
+# Percentile to use for upper envelope (80 = 80th percentile)
+# Higher values make the envelope track the upper values more closely
+envelope_percentile: 80
+
+# How far below the envelope to consider a value an outlier
+# 0.15 means values more than 0.15 NDVI units below envelope are outliers
+envelope_threshold_below: 0.15
 
 sites:
   forthgr:

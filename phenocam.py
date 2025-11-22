@@ -101,9 +101,9 @@ def get_site_seasons(site_info: Dict) -> Dict:
     """Get seasonal data for a site based on camera date range."""
     seasons = {}
 
-    # Define season boundaries (April 1 - October 31)
-    season_start_month_day = (4, 1)  # April 1
-    season_end_month_day = (10, 31)  # October 31
+    # Define season boundaries (Whole year)
+    season_start_month_day = (1, 1)  # January 1
+    season_end_month_day = (12, 31)  # December 31
 
     # Don't create seasons beyond 2024 (no satellite data for future)
     max_year = 2024

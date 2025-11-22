@@ -3,12 +3,14 @@
 Calculate NDVI time series and statistics from Sentinel-2 imagery.
 """
 
+import argparse
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Tuple
 
 import ee
+import numpy as np
 import yaml  # type: ignore
 
 
@@ -59,26 +61,95 @@ def calculate_gaps(dates: List[str], threshold_days: int = 5) -> Tuple[int, int,
     )
 
 
-def calculate_ndvi(lat: float, lon: float, start_date: str, end_date: str) -> Dict:
-    """Calculate NDVI time series for all S2 dates, with null for cloudy/invalid."""
-    # Load NDVI thresholds from config
-    config = load_config()
-    ndvi_min = config.get("ndvi_min_threshold", 0.1)
-    ndvi_max = config.get("ndvi_max_threshold", 0.95)
+def detect_outliers_upper_envelope(
+    ndvi_data: List[Dict],
+    window_days: int = 30,
+    percentile: int = 80,
+    threshold_below: float = 0.15,
+) -> List[bool]:
+    """
+    Detect outliers based on deviation from upper envelope.
+
+    Args:
+        ndvi_data: List of dicts with 'date' and 'ndvi' keys (ndvi can be None)
+        window_days: Size of rolling window in days
+        percentile: Which percentile to use for upper envelope (e.g., 80th)
+        threshold_below: How far below envelope to consider outlier
+
+    Returns:
+        List of boolean values indicating if each point is an outlier
+    """
+    from datetime import datetime, timedelta
+
+    # Filter out None values and prepare data
+    valid_data = [
+        (datetime.fromisoformat(d["date"]), d["ndvi"])
+        for d in ndvi_data
+        if d["ndvi"] is not None
+    ]
+
+    if not valid_data:
+        return [False] * len(ndvi_data)
+
+    # Sort by date
+    valid_data.sort(key=lambda x: x[0])
+
+    # Calculate upper envelope for each point
+    upper_envelopes = {}
+    for target_date, target_ndvi in valid_data:
+        # Get values within window
+        window_start = target_date - timedelta(days=window_days // 2)
+        window_end = target_date + timedelta(days=window_days // 2)
+
+        window_values = [
+            ndvi
+            for date, ndvi in valid_data
+            if window_start <= date <= window_end
+            and ndvi >= 0.1  # Exclude obviously bad values
+        ]
+
+        if window_values:
+            # Calculate percentile for this window
+            envelope_value = np.percentile(window_values, percentile)
+            upper_envelopes[target_date.date().isoformat()] = envelope_value
+
+    # Determine outliers
+    outliers = []
+    for d in ndvi_data:
+        if d["ndvi"] is None:
+            outliers.append(False)
+        else:
+            ndvi_val = d["ndvi"]
+            date_str = d["date"]
+
+            # Simple absolute threshold for obvious outliers
+            if ndvi_val < 0.1:
+                outliers.append(True)
+            elif date_str in upper_envelopes:
+                # Check if value is too far below envelope
+                diff = upper_envelopes[date_str] - ndvi_val
+                is_outlier = bool(diff > threshold_below)
+                outliers.append(is_outlier)
+            else:
+                # If we couldn't calculate envelope, don't mark as outlier
+                outliers.append(False)
+
+    return outliers
+
+
+def fetch_ndvi_time_series(lat, lon, start_date, end_date):
+    """Fetch NDVI time series from GEE for a given location and date range."""
+    from collections import defaultdict
+
+    import ee
 
     point = ee.Geometry.Point([lon, lat])
     region = point.buffer(100)
-
-    from collections import defaultdict
-
-    # Get ALL Sentinel-2 scenes (no cloud filter)
     all_collection = (
         ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
         .filterBounds(region)
         .filterDate(start_date, end_date)
     )
-
-    # Get all unique scene dates
     all_dates = (
         all_collection.map(
             lambda img: ee.Feature(None, {"date": img.date().format("YYYY-MM-dd")})
@@ -86,27 +157,20 @@ def calculate_ndvi(lat: float, lon: float, start_date: str, end_date: str) -> Di
         .distinct("date")
         .getInfo()["features"]
     )
-
     scene_dates = sorted(set(f["properties"]["date"] for f in all_dates))
 
-    # Calculate NDVI only for clear scenes with cloud masking
     def mask_clouds(image):
-        """Apply cloud mask using QA60 band."""
         qa = image.select("QA60")
         cloud_mask = qa.bitwiseAnd(1 << 10).eq(0).And(qa.bitwiseAnd(1 << 11).eq(0))
         return image.updateMask(cloud_mask)
 
     def add_ndvi(image):
-        """Add NDVI band to image."""
         ndvi = image.normalizedDifference(["B8", "B4"]).rename("NDVI")
         return image.addBands(ndvi).set("date", image.date().format("YYYY-MM-dd"))
 
-    # Process ALL scenes and calculate NDVI
     ndvi_collection = all_collection.map(mask_clouds).map(add_ndvi)
 
-    # Extract NDVI values at point
     def extract_ndvi(image):
-        """Extract NDVI value at point."""
         ndvi_value = image.select("NDVI").reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=region,
@@ -124,77 +188,73 @@ def calculate_ndvi(lat: float, lon: float, start_date: str, end_date: str) -> Di
     time_series = ndvi_collection.map(extract_ndvi)
     ts_list = time_series.getInfo()["features"]
 
-    # Collect NDVI values by date
     date_ndvi = defaultdict(list)
-    used_dates = []  # Track dates with plausible NDVI for stats
     for feature in ts_list:
         ndvi_val = feature["properties"].get("ndvi")
         if ndvi_val is not None:
             date = feature["properties"]["date"]
             date_ndvi[date].append(ndvi_val)
 
-    # Build complete time series marking outliers
     ndvi_series = []
-    ndvi_values = []  # Only plausible NDVI values for statistics
-
     for date in scene_dates:
         if date in date_ndvi:
-            # NDVI value available - check if plausible
             values = date_ndvi[date]
             avg_ndvi = sum(values) / len(values)
-
-            # Check if NDVI is plausible
-            is_outlier = avg_ndvi < ndvi_min or avg_ndvi > ndvi_max
-
-            ndvi_series.append(
-                {
-                    "date": date,
-                    "ndvi": round(avg_ndvi, 4),
-                    "outlier": is_outlier,  # Mark outliers
-                }
-            )
-
-            # Only include plausible values in stats
-            if not is_outlier:
-                ndvi_values.append(avg_ndvi)
-                used_dates.append(date)
+            ndvi_series.append({"date": date, "ndvi": round(avg_ndvi, 4)})
         else:
-            # No NDVI data available
-            ndvi_series.append(
-                {
-                    "date": date,
-                    "ndvi": None,  # Will be displayed as N/A
-                }
-            )
+            ndvi_series.append({"date": date, "ndvi": None})
 
-    # Calculate gap statistics ONLY for dates with plausible NDVI values
-    # Excludes outliers (likely clouds/artifacts at the specific location)
-    # This differs from get_scenes.py which calculates gaps for ALL available scenes
+    return ndvi_series
+
+
+def calculate_ndvi_from_series(ndvi_series):
+    """Calculate NDVI statistics, outliers, and gaps from a pre-fetched NDVI time series."""
+    config = load_config()
+    window_days = config.get("envelope_window_days", 30)
+    percentile = config.get("envelope_percentile", 80)
+    threshold_below = config.get("envelope_threshold_below", 0.15)
+
+    outlier_flags = detect_outliers_upper_envelope(
+        ndvi_series,
+        window_days=window_days,
+        percentile=percentile,
+        threshold_below=threshold_below,
+    )
+
+    ndvi_values = []
+    used_dates = []
+
+    for entry, is_outlier in zip(ndvi_series, outlier_flags):
+        if entry["ndvi"] is not None:
+            entry["outlier"] = is_outlier
+            if not is_outlier:
+                ndvi_values.append(entry["ndvi"])
+                used_dates.append(entry["date"])
+
     gap_stats = calculate_gaps(used_dates, threshold_days=3)
 
-    # Calculate statistics (only from valid values)
     stats = {
-        "ndvi_time_series": ndvi_series,  # All dates, null for cloudy
-        "ndvi_observations": len(ndvi_values),  # Count of valid NDVI only
+        "ndvi_time_series": ndvi_series,
+        "ndvi_observations": len(ndvi_values),
         "ndvi_mean": round(sum(ndvi_values) / len(ndvi_values), 4)
         if ndvi_values
         else 0.0,
         "ndvi_min": round(min(ndvi_values), 4) if ndvi_values else 0.0,
         "ndvi_max": round(max(ndvi_values), 4) if ndvi_values else 0.0,
-        "ndvi_max_s2_gap_days": gap_stats[0],  # Gap stats for NDVI-used scenes only
-        "ndvi_s2_gap_count": gap_stats[1],  # Number of gaps in NDVI-used scenes
-        "ndvi_s2_weighted_gap_score": round(
-            gap_stats[2], 2
-        ),  # Weighted gap for NDVI scenes
+        "ndvi_max_s2_gap_days": gap_stats[0],
+        "ndvi_s2_gap_count": gap_stats[1],
+        "ndvi_s2_weighted_gap_score": round(gap_stats[2], 2),
+        "ndvi_range": round(max(ndvi_values) - min(ndvi_values), 4)
+        if ndvi_values
+        else 0.0,
     }
-
-    # Add range
-    if ndvi_values:
-        stats["ndvi_range"] = round(stats["ndvi_max"] - stats["ndvi_min"], 4)
-    else:
-        stats["ndvi_range"] = 0.0
-
     return stats
+
+
+def calculate_ndvi(lat: float, lon: float, start_date: str, end_date: str) -> Dict:
+    """Calculate NDVI time series for all S2 dates, with null for cloudy/invalid."""
+    ndvi_series = fetch_ndvi_time_series(lat, lon, start_date, end_date)
+    return calculate_ndvi_from_series(ndvi_series)
 
 
 def process_site_season(
@@ -311,87 +371,158 @@ def save_selected_sites(geojson: Dict):
     print("Updated selected_sites.geojson with NDVI statistics")
 
 
+def fetch_all_raw_ndvi():
+    """Fetch NDVI time series for all selected sites/seasons and store in selected_sites.geojson."""
+    import json
+
+    import yaml
+
+    all_sites_path = "all_sites.geojson"
+    selected_sites_path = "selected_sites.geojson"
+    config_path = "config.yaml"
+
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    # Read season dates from all_sites.geojson (has updated full-year dates)
+    with open(all_sites_path, "r") as f:
+        all_sites_geojson = json.load(f)
+
+    # Try to read existing selected_sites.geojson, or create from all_sites
+    try:
+        with open(selected_sites_path, "r") as f:
+            selected_geojson = json.load(f)
+    except FileNotFoundError:
+        selected_geojson = {"type": "FeatureCollection", "features": []}
+
+    all_features_by_site = {
+        f["properties"]["sitename"]: f for f in all_sites_geojson["features"]
+    }
+    selected_features_by_site = {
+        f["properties"]["sitename"]: f for f in selected_geojson["features"]
+    }
+
+    for site_id, years in config["sites"].items():
+        all_feature = all_features_by_site.get(site_id)
+        if not all_feature:
+            continue
+
+        # Get or create feature in selected_sites
+        if site_id in selected_features_by_site:
+            feature = selected_features_by_site[site_id]
+        else:
+            # Copy from all_sites
+            feature = json.loads(json.dumps(all_feature))
+            selected_geojson["features"].append(feature)
+            selected_features_by_site[site_id] = feature
+
+        props = feature["properties"]
+        lat = feature["geometry"]["coordinates"][1]
+        lon = feature["geometry"]["coordinates"][0]
+
+        for year in years:
+            year = str(year)
+            # Get season dates from all_sites (updated with full year)
+            all_season = all_features_by_site[site_id]["properties"]["seasons"].get(
+                year
+            )
+            if not all_season:
+                continue
+
+            # Update season dates in selected_sites
+            if "seasons" not in props:
+                props["seasons"] = {}
+            if year not in props["seasons"]:
+                props["seasons"][year] = json.loads(json.dumps(all_season))
+            else:
+                # Update dates but preserve existing NDVI data
+                props["seasons"][year]["season_start_date"] = all_season[
+                    "season_start_date"
+                ]
+                props["seasons"][year]["season_end_date"] = all_season[
+                    "season_end_date"
+                ]
+                props["seasons"][year]["season_length_days"] = all_season[
+                    "season_length_days"
+                ]
+
+            start_date = props["seasons"][year]["season_start_date"]
+            end_date = props["seasons"][year]["season_end_date"]
+
+            ndvi_series = fetch_ndvi_time_series(lat, lon, start_date, end_date)
+            props["seasons"][year]["ndvi_time_series_raw"] = ndvi_series
+            print(f"Fetched NDVI for {site_id} {year}: {len(ndvi_series)} dates")
+
+    with open(selected_sites_path, "w") as f:
+        json.dump(selected_geojson, f, indent=2)
+    print("Updated selected_sites.geojson with raw NDVI time series.")
+
+
+def analyze_all_ndvi():
+    """Analyze NDVI time series for all selected sites/seasons using cached raw NDVI."""
+    import json
+
+    import yaml
+
+    geojson_path = "selected_sites.geojson"
+    config_path = "config.yaml"
+
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    with open(geojson_path, "r") as f:
+        geojson = json.load(f)
+
+    features_by_site = {f["properties"]["sitename"]: f for f in geojson["features"]}
+
+    for site_id, years in config["sites"].items():
+        feature = features_by_site.get(site_id)
+        if not feature:
+            continue
+        props = feature["properties"]
+        for year in years:
+            year = str(year)
+            season = props.get("seasons", {}).get(year)
+            if not season:
+                continue
+            ndvi_series = season.get("ndvi_time_series_raw") or season.get(
+                "ndvi_time_series"
+            )
+            if not ndvi_series:
+                print(f"No NDVI data for {site_id} {year}, skipping.")
+                continue
+
+            # Convert existing data to raw format (remove outlier flags if present)
+            raw_series = []
+            for entry in ndvi_series:
+                raw_entry = {"date": entry["date"], "ndvi": entry["ndvi"]}
+                raw_series.append(raw_entry)
+
+            stats = calculate_ndvi_from_series(raw_series)
+            season.update(stats)
+            print(
+                f"Analyzed NDVI for {site_id} {year}: {stats['ndvi_observations']} obs"
+            )
+
+    with open(geojson_path, "w") as f:
+        json.dump(geojson, f, indent=2)
+    print("Updated selected_sites.geojson with NDVI statistics.")
+
+
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["fetch", "analyze", "full"], default="full")
+    args = parser.parse_args()
+
     init_ee()
 
-    # Load config and all sites
-    config = load_config()
-    all_sites_geojson = load_all_sites()
-
-    # Build sites data structure from GeoJSON for selected sites only
-    sites = {}
-    selected_features = []
-
-    for feature in all_sites_geojson["features"]:
-        props = feature["properties"]
-        sitename = props["sitename"]
-
-        # Check if this site is in config
-        if sitename in config["sites"]:
-            selected_years = config["sites"][sitename]
-
-            # Filter seasons to only include selected years
-            selected_seasons = {}
-            for year_str in selected_years:
-                year = str(year_str)
-                if year in props["seasons"]:
-                    selected_seasons[year] = props["seasons"][year]
-
-            if selected_seasons:
-                # Create site entry
-                sites[sitename] = {
-                    "sitename": sitename,
-                    "lat": feature["geometry"]["coordinates"][1],
-                    "lon": feature["geometry"]["coordinates"][0],
-                    "vegetation_type": props["vegetation_type"],
-                    "description": props["description"],
-                    "elevation": props["elevation"],
-                    "country": props.get("country", ""),
-                    "ndvi_selected": True,
-                    "seasons": selected_seasons,
-                }
-
-                # Keep feature for output
-                feature_copy = json.loads(json.dumps(feature))
-                feature_copy["properties"]["seasons"] = selected_seasons
-                selected_features.append(feature_copy)
-
-    # Process NDVI for selected sites
-    data = {"sites": sites}
-    data = process_ndvi(data)
-
-    # Update features with NDVI results
-    for feature in selected_features:
-        sitename = feature["properties"]["sitename"]
-        if sitename in data["sites"]:
-            site_data = data["sites"][sitename]
-            for year, season in site_data["seasons"].items():
-                if year in feature["properties"]["seasons"]:
-                    feature["properties"]["seasons"][year].update(
-                        {
-                            "ndvi_mean": season.get("ndvi_mean", 0.0),
-                            "ndvi_min": season.get("ndvi_min", 0.0),
-                            "ndvi_max": season.get("ndvi_max", 0.0),
-                            "ndvi_range": season.get("ndvi_range", 0.0),
-                            "ndvi_observations": season.get("ndvi_observations", 0),
-                            "ndvi_time_series": season.get("ndvi_time_series", []),
-                            "ndvi_max_s2_gap_days": season.get(
-                                "ndvi_max_s2_gap_days", 0
-                            ),
-                            "ndvi_s2_gap_count": season.get("ndvi_s2_gap_count", 0),
-                            "ndvi_s2_weighted_gap_score": season.get(
-                                "ndvi_s2_weighted_gap_score", 0.0
-                            ),
-                        }
-                    )
-
-    # Save selected sites with NDVI data
-    selected_geojson = {
-        "type": "FeatureCollection",
-        "features": selected_features,
-    }
-    save_selected_sites(selected_geojson)
+    if args.mode == "fetch":
+        fetch_all_raw_ndvi()
+    elif args.mode == "analyze":
+        analyze_all_ndvi()
+    else:
+        fetch_all_raw_ndvi()
+        analyze_all_ndvi()
 
 
 if __name__ == "__main__":
